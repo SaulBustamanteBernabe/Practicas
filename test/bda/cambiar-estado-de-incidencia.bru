@@ -1,0 +1,17 @@
+meta {
+  name: Cambiar Estado De Incidencia
+  type: http
+  seq: 1
+}
+
+put {
+  url: http://localhost:3300/incidencias/estado/1
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "Estado" : "CANCELADA"
+  }
+}

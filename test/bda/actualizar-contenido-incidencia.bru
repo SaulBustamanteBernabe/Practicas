@@ -1,0 +1,17 @@
+meta {
+  name: Actualizar Contenido Incidencia
+  type: http
+  seq: 1
+}
+
+put {
+  url: http://localhost:3300/incidencias/descripcion/6
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "Contenido" : "Nuevo Contenido"
+  }
+}

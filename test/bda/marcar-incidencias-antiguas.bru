@@ -1,0 +1,17 @@
+meta {
+  name: Marcar Incidencias Antiguas
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://localhost:3300/incidencias/marcar-antiguas
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "fecha" : "2025-09-11"
+  }
+}
