@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Servidor: localhost:3306
--- Tiempo de generación: 24-09-2025 a las 05:08:50
+-- Tiempo de generación: 25-09-2025 a las 04:43:05
 -- Versión del servidor: 11.8.3-MariaDB-0+deb13u1 from Debian
 -- Versión de PHP: 8.4.11
 
@@ -443,7 +443,150 @@ INSERT INTO `Incidencias` (`eCodIncidencia`, `fkeCodTypeIssue`, `fkeCodAula`, `f
 (4, 5, 1, 1, 10, '2025-09-13 15:30:00', 'Se va en clase', 'CANCELADA', 11, 2, '2025-09-13 17:39:55', NULL, 0),
 (5, 4, 2, 2, 11, '2025-09-13 16:42:39', 'Descripción X', 'REVISADA', 11, 9, '2025-09-13 17:43:43', NULL, 1),
 (8, 2, 1, 4, 11, '2025-09-14 23:29:49', 'Rompio el Proyector, o no la politzia', 'POR REVISAR', 11, 7, '2025-09-14 17:31:29', NULL, 1),
+(11, 2, 2, 2, 12, '2025-09-24 10:00:00', 'El proyector no enciende en el aula 5. Parece ser un problema del cable de alimentación.', 'REVISADA', 12, 13, '2025-09-24 21:28:12', '2025-09-24 21:59:52', 1);
+
+--
+-- Disparadores `Incidencias`
+--
+DELIMITER $$
+CREATE TRIGGER `trg_actualizar_fecha_modificacion` BEFORE UPDATE ON `Incidencias` FOR EACH ROW BEGIN
+    SET NEW.fhUpdateIncidencia = NOW();
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_asignar_fecha_creacion` BEFORE INSERT ON `Incidencias` FOR EACH ROW BEGIN
+    IF NEW.fhCreatedIncidencia IS NULL THEN
+        SET NEW.fhCreatedIncidencia = NOW();
+    END IF;
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_backup_incidencia_eliminada` BEFORE DELETE ON `Incidencias` FOR EACH ROW BEGIN
+    INSERT INTO IncidenciasBackup 
+        (eCodIncidencia, fkeCodTypeIssue, fkeCodAula, fkeCodGravedad, fkeCodUsers_Registra, 
+         fhFechaHoraOcurrencia, tDescripcion, tEstadoIncidencia, fkeCodUsers_AQuienReporta, 
+         fkeCodUsers_QuienRegistra, fhCreatedIncidencia, fhUpdateIncidencia, bStateIncidencia)
+    VALUES 
+        (OLD.eCodIncidencia, OLD.fkeCodTypeIssue, OLD.fkeCodAula, OLD.fkeCodGravedad, OLD.fkeCodUsers_Registra, 
+         OLD.fhFechaHoraOcurrencia, OLD.tDescripcion, OLD.tEstadoIncidencia, OLD.fkeCodUsers_AQuienReporta, 
+         OLD.fkeCodUsers_QuienRegistra, OLD.fhCreatedIncidencia, OLD.fhUpdateIncidencia, OLD.bStateIncidencia);
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_bloquear_eliminacion_revisadas` BEFORE DELETE ON `Incidencias` FOR EACH ROW BEGIN
+    IF OLD.tEstadoIncidencia = 'REVISADA' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ERROR: No se puede eliminar una incidencia que ya ha sido revisada.';
+    END IF;
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_contador_incidencias_usuario` AFTER INSERT ON `Incidencias` FOR EACH ROW BEGIN
+    UPDATE Users
+    SET eIncidencias = eIncidencias + 1
+    WHERE eCodUser = NEW.fkeCodUsers_QuienRegistra;
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_control_gravedad` BEFORE INSERT ON `Incidencias` FOR EACH ROW BEGIN
+    IF NEW.fkeCodGravedad < 1 THEN
+        SET NEW.fkeCodGravedad = 1;
+    ELSEIF NEW.fkeCodGravedad > 4 THEN
+        SET NEW.fkeCodGravedad = 4;
+    END IF;
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_historico_descripciones` AFTER UPDATE ON `Incidencias` FOR EACH ROW BEGIN
+    IF OLD.tDescripcion <> NEW.tDescripcion THEN
+        INSERT INTO IncidenciasHistorial (fkeCodIncidencia, tDescripcion, fhCreatedDescripcion)
+        VALUES (OLD.eCodIncidencia, OLD.tDescripcion, NOW());
+    END IF;
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_log_actualizacion` AFTER UPDATE ON `Incidencias` FOR EACH ROW BEGIN
+    IF OLD.tDescripcion <> NEW.tDescripcion THEN
+        INSERT INTO Logs (Description) VALUES (CONCAT('Incidencia ID: ', NEW.eCodIncidencia, ' - Campo actualizado: tDescripcion'));
+    END IF;
+    IF OLD.tEstadoIncidencia <> NEW.tEstadoIncidencia THEN
+        INSERT INTO Logs (Description) VALUES (CONCAT('Incidencia ID: ', NEW.eCodIncidencia, ' - Campo actualizado: tEstadoIncidencia'));
+    END IF;
+    IF OLD.fkeCodGravedad <> NEW.fkeCodGravedad THEN
+        INSERT INTO Logs (Description) VALUES (CONCAT('Incidencia ID: ', NEW.eCodIncidencia, ' - Campo actualizado: fkeCodGravedad'));
+    END IF;
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_log_insercion` AFTER INSERT ON `Incidencias` FOR EACH ROW BEGIN
+    INSERT INTO Logs (Description) VALUES (CONCAT('Nueva incidencia creada con ID: ', NEW.eCodIncidencia));
+END
+$$
+DELIMITER ;
+DELIMITER $$
+CREATE TRIGGER `trg_notificacion_cambios_criticos` AFTER UPDATE ON `Incidencias` FOR EACH ROW BEGIN
+    IF OLD.tEstadoIncidencia <> NEW.tEstadoIncidencia OR OLD.fkeCodGravedad <> NEW.fkeCodGravedad THEN
+        INSERT INTO Logs (Description) VALUES (CONCAT('CAMBIO CRITICO en incidencia ID: ', NEW.eCodIncidencia, '. Estado o gravedad modificados.'));
+    END IF;
+END
+$$
+DELIMITER ;
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `IncidenciasBackup`
+--
+
+CREATE TABLE `IncidenciasBackup` (
+  `eCodIncidencia` int(11) NOT NULL,
+  `fkeCodTypeIssue` int(11) NOT NULL,
+  `fkeCodAula` int(11) NOT NULL,
+  `fkeCodGravedad` int(11) NOT NULL,
+  `fkeCodUsers_Registra` int(11) NOT NULL,
+  `fhFechaHoraOcurrencia` datetime NOT NULL,
+  `tDescripcion` text NOT NULL,
+  `tEstadoIncidencia` enum('POR REVISAR','REVISADA','CANCELADA','') NOT NULL,
+  `fkeCodUsers_AQuienReporta` int(11) NOT NULL,
+  `fkeCodUsers_QuienRegistra` int(11) NOT NULL,
+  `fhCreatedIncidencia` datetime NOT NULL DEFAULT current_timestamp(),
+  `fhUpdateIncidencia` datetime DEFAULT NULL,
+  `bStateIncidencia` tinyint(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Volcado de datos para la tabla `IncidenciasBackup`
+--
+
+INSERT INTO `IncidenciasBackup` (`eCodIncidencia`, `fkeCodTypeIssue`, `fkeCodAula`, `fkeCodGravedad`, `fkeCodUsers_Registra`, `fhFechaHoraOcurrencia`, `tDescripcion`, `tEstadoIncidencia`, `fkeCodUsers_AQuienReporta`, `fkeCodUsers_QuienRegistra`, `fhCreatedIncidencia`, `fhUpdateIncidencia`, `bStateIncidencia`) VALUES
 (10, 6, 2, 1, 11, '2025-09-24 04:35:50', '', 'POR REVISAR', 11, 9, '2025-09-23 22:36:41', NULL, 1);
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `IncidenciasHistorial`
+--
+
+CREATE TABLE `IncidenciasHistorial` (
+  `eCodIncidenciasHistorial` int(11) NOT NULL,
+  `fkeCodIncidencia` int(11) NOT NULL,
+  `tDescripcion` text NOT NULL,
+  `fhCreatedDescripcion` datetime NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Volcado de datos para la tabla `IncidenciasHistorial`
+--
+
+INSERT INTO `IncidenciasHistorial` (`eCodIncidenciasHistorial`, `fkeCodIncidencia`, `tDescripcion`, `fhCreatedDescripcion`) VALUES
+(1, 11, 'Proyector no enciende en el aula 5.', '2025-09-24 21:59:52');
 
 -- --------------------------------------------------------
 
@@ -453,8 +596,20 @@ INSERT INTO `Incidencias` (`eCodIncidencia`, `fkeCodTypeIssue`, `fkeCodAula`, `f
 
 CREATE TABLE `Logs` (
   `eCodLogs` int(11) NOT NULL,
-  `Description` text NOT NULL
+  `Description` text NOT NULL,
+  `fhCreatedLog` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+--
+-- Volcado de datos para la tabla `Logs`
+--
+
+INSERT INTO `Logs` (`eCodLogs`, `Description`, `fhCreatedLog`) VALUES
+(1, 'Nueva incidencia creada con ID: 11', '2025-09-24 21:28:12'),
+(2, 'Incidencia ID: 11 - Campo actualizado: tDescripcion', '2025-09-24 21:59:52'),
+(3, 'Incidencia ID: 11 - Campo actualizado: tEstadoIncidencia', '2025-09-24 21:59:52'),
+(4, 'Incidencia ID: 11 - Campo actualizado: fkeCodGravedad', '2025-09-24 21:59:52'),
+(5, 'CAMBIO CRITICO en incidencia ID: 11. Estado o gravedad modificados.', '2025-09-24 21:59:52');
 
 -- --------------------------------------------------------
 
@@ -579,6 +734,7 @@ CREATE TABLE `Users` (
   `tCorreoInstitucional` text NOT NULL,
   `tTelefono` text NOT NULL,
   `tDireccion` text NOT NULL,
+  `eIncidencias` int(11) NOT NULL DEFAULT 0,
   `bStateUser` tinyint(1) NOT NULL DEFAULT 1
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -586,18 +742,20 @@ CREATE TABLE `Users` (
 -- Volcado de datos para la tabla `Users`
 --
 
-INSERT INTO `Users` (`eCodUser`, `tFullNameUser`, `eMatricula`, `tPassword`, `tGenero`, `tCorreoInstitucional`, `tTelefono`, `tDireccion`, `bStateUser`) VALUES
-(1, 'Saúl Bustamante Bernabe', 20226000, '151515', 'Masculino', 'sbustamante@ucol.mx', '3143372383', 'Casa', 1),
-(2, 'Alejandro Jeronimo Azamar', 20191012, '191919', 'No Binario, es un helicóptero de combate', 'ajeronimo@ucol.mx', '3141000104', 'Colonia del pacifico, en las brisas c.p. 28218', 1),
-(3, 'Citlaly Estefania Samano Lopez', 20181126, '090909', 'Femenino', 'csamano@ucol.mx', '3141650597', 'Casa Centro 1', 1),
-(4, 'Angel Gabriel Diaz Ramirez', 20190966, '764733', 'Masculino', 'adiaz@ucol.mx', '3141627605', 'Por la bimbo', 1),
-(5, 'NombrePruebaB_PUT', 20102010, '$2b$10$gSaemUe55rtzQmY6PqvKj.Ol.eHP27EWDLFq30OckMLVgRQIlZM5G', 'Genero123', 'qwerty_put@ucol.mx', '3141001234', 'CasaEjemplo', 0),
-(6, 'NombrePruebaB_PUT', 20102010, '$2b$10$11.I88GVPvQPynCNh726YeMbp1xg6pOqSw5jYOPxrTK/cwyqEN3V.', 'Genero123', 'qwerty_put@ucol.mx', '3141001234', 'CasaEjemplo', 0),
-(7, 'NAME', 101010, 'PASS', 'GEN', 'EMAIL', 'TELEFONO', 'DIRECCION', 1),
-(8, 'NombrePruebaC_SP', 10101010, '$2b$10$fEr3trttWJ.Ahx7vjsq63.FtKtCSgAybzqwyEFwgb5WNd4kdL3lIi', 'Genero123_SP', 'qwerty_SP@ucol.mx', '3141001234_SP', 'CasaEjemplo_SP', 1),
-(9, 'NombrePruebaX_Editado', 20102019, '$2b$10$kZwkKIzO3YPIAZsTYULnruD9QQCrg.zc8qmfNEs0cQ2z16AKN2yRa', 'Genero123', 'qwerty_put123@ucol.mx', '3141001234', 'CasaEjemplo', 0),
-(10, 'Maestro A', 20125454, '1234', 'Masculino', 'maestro_a@ucol.mx', '3129871234', 'Casa A', 1),
-(11, 'Maestro B', 20101234, '1234', 'Masculino', 'maestro_b@ucol.mx', '3103101234', 'Casa B', 1);
+INSERT INTO `Users` (`eCodUser`, `tFullNameUser`, `eMatricula`, `tPassword`, `tGenero`, `tCorreoInstitucional`, `tTelefono`, `tDireccion`, `eIncidencias`, `bStateUser`) VALUES
+(1, 'Saúl Bustamante Bernabe', 20226000, '151515', 'Masculino', 'sbustamante@ucol.mx', '3143372383', 'Casa', 0, 1),
+(2, 'Alejandro Jeronimo Azamar', 20191012, '191919', 'No Binario, es un helicóptero de combate', 'ajeronimo@ucol.mx', '3141000104', 'Colonia del pacifico, en las brisas c.p. 28218', 0, 1),
+(3, 'Citlaly Estefania Samano Lopez', 20181126, '090909', 'Femenino', 'csamano@ucol.mx', '3141650597', 'Casa Centro 1', 0, 1),
+(4, 'Angel Gabriel Diaz Ramirez', 20190966, '764733', 'Masculino', 'adiaz@ucol.mx', '3141627605', 'Por la bimbo', 0, 1),
+(5, 'NombrePruebaB_PUT', 20102010, '$2b$10$gSaemUe55rtzQmY6PqvKj.Ol.eHP27EWDLFq30OckMLVgRQIlZM5G', 'Genero123', 'qwerty_put@ucol.mx', '3141001234', 'CasaEjemplo', 0, 0),
+(6, 'NombrePruebaB_PUT', 20102010, '$2b$10$11.I88GVPvQPynCNh726YeMbp1xg6pOqSw5jYOPxrTK/cwyqEN3V.', 'Genero123', 'qwerty_put@ucol.mx', '3141001234', 'CasaEjemplo', 0, 0),
+(7, 'NAME', 101010, 'PASS', 'GEN', 'EMAIL', 'TELEFONO', 'DIRECCION', 0, 1),
+(8, 'NombrePruebaC_SP', 10101010, '$2b$10$fEr3trttWJ.Ahx7vjsq63.FtKtCSgAybzqwyEFwgb5WNd4kdL3lIi', 'Genero123_SP', 'qwerty_SP@ucol.mx', '3141001234_SP', 'CasaEjemplo_SP', 0, 1),
+(9, 'NombrePruebaX_Editado', 20102019, '$2b$10$kZwkKIzO3YPIAZsTYULnruD9QQCrg.zc8qmfNEs0cQ2z16AKN2yRa', 'Genero123', 'qwerty_put123@ucol.mx', '3141001234', 'CasaEjemplo', 0, 0),
+(10, 'Maestro A', 20125454, '1234', 'Masculino', 'maestro_a@ucol.mx', '3129871234', 'Casa A', 0, 1),
+(11, 'Maestro B', 20101234, '1234', 'Masculino', 'maestro_b@ucol.mx', '3103101234', 'Casa B', 0, 1),
+(12, 'Profesor Oak', 20001001, 'pass', 'Masculino', 'oak@ucol.mx', '123456', 'Pueblo Paleta', 0, 1),
+(13, 'Alumno Ash', 20002002, 'pass', 'Masculino', 'ash@ucol.mx', '654321', 'Pueblo Paleta', 1, 1);
 
 --
 -- Disparadores `Users`
@@ -700,6 +858,13 @@ ALTER TABLE `Incidencias`
   ADD KEY `fkeCodUsers_Registra` (`fkeCodUsers_Registra`),
   ADD KEY `fkeCodUsers_AQuienReporta` (`fkeCodUsers_AQuienReporta`),
   ADD KEY `fkeCodUsers_QuienRegistra` (`fkeCodUsers_QuienRegistra`);
+
+--
+-- Indices de la tabla `IncidenciasHistorial`
+--
+ALTER TABLE `IncidenciasHistorial`
+  ADD PRIMARY KEY (`eCodIncidenciasHistorial`),
+  ADD KEY `fkeCodIncidencia` (`fkeCodIncidencia`);
 
 --
 -- Indices de la tabla `Logs`
@@ -808,13 +973,19 @@ ALTER TABLE `Horario`
 -- AUTO_INCREMENT de la tabla `Incidencias`
 --
 ALTER TABLE `Incidencias`
-  MODIFY `eCodIncidencia` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
+  MODIFY `eCodIncidencia` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+
+--
+-- AUTO_INCREMENT de la tabla `IncidenciasHistorial`
+--
+ALTER TABLE `IncidenciasHistorial`
+  MODIFY `eCodIncidenciasHistorial` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT de la tabla `Logs`
 --
 ALTER TABLE `Logs`
-  MODIFY `eCodLogs` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `eCodLogs` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
 
 --
 -- AUTO_INCREMENT de la tabla `Materias`
@@ -850,7 +1021,7 @@ ALTER TABLE `typeUsers`
 -- AUTO_INCREMENT de la tabla `Users`
 --
 ALTER TABLE `Users`
-  MODIFY `eCodUser` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
+  MODIFY `eCodUser` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=14;
 
 --
 -- Restricciones para tablas volcadas
